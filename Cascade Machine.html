@@ -1,0 +1,509 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Cascade Machine</title>
+<style>
+  :root{color-scheme:dark;--ground:#0b0a10;--haze:#231a33}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--ground)}
+  body{background:radial-gradient(ellipse at 20% 10%,var(--haze) 0%,var(--ground) 60%),var(--ground)}
+  #stage{position:fixed;inset:0;opacity:0;transition:opacity 1.4s ease;pointer-events:none}
+  #stage .p{position:absolute;margin:0;transition:filter .45s ease}
+  .lat{opacity:.14;transition:opacity .7s ease!important}
+  .lat:checked{opacity:.75}
+  .hit{filter:drop-shadow(0 0 8px currentColor) brightness(1.6)}
+  select,button,textarea,input[type=number],details,.scr{font-family:ui-monospace,Menlo,Consolas,monospace}
+  select{background:transparent;border:1px solid currentColor;border-radius:2px;outline:none}
+  select[size] option:checked{background:currentColor;color:#0b0a10}
+  input[type=number]{background:transparent;border:none;border-bottom:2px solid currentColor;text-align:center;outline:none}
+  textarea{background:transparent;border:1px dashed currentColor;resize:none;overflow:hidden;outline:none;line-height:1.3}
+  input[type=color]{border:none;background:none;padding:0}
+  button.k{background:transparent;color:inherit;border:1px solid currentColor;border-radius:50% 12% 50% 12%;padding:0;line-height:1}
+  button.k.on{background:currentColor;color:#0b0a10}
+  .scr{overflow-y:auto;border-left:2px solid currentColor;padding:0 8px;scrollbar-width:none}
+  .scr::-webkit-scrollbar{display:none}
+  .scr div{white-space:nowrap;display:flex;align-items:center;gap:6px;padding:2px 0}
+  details{max-width:40vw}
+  details div{opacity:.8;padding-left:1em}
+</style>
+<div id="stage"></div>
+<script>
+const stage = document.getElementById('stage');
+let W, H, gen = 0;
+
+// ---------- helpers ----------
+const R = (a, b) => a + Math.random() * (b - a);
+const RI = (a, b) => Math.floor(R(a, b + 1));
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const hsl = (h, s = 85, l = 66) => `hsl(${((h % 360) + 360) % 360} ${s}% ${l}%)`;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const fire = (el, t) => el.dispatchEvent(new Event(t, { bubbles: true }));
+const GL = Array.from('◼◻▲△▼▽●○◆◇✕✦✧⬡⬢◈◎⊕⊗※⁂∿⌁⋰⟡◌');
+const WORDS = ['tick','slip','pour','turn','drip','roll','spin','tap','hum','nudge','fall','wake','lean','tip','hand','pass','carry','ring','tilt','spill','echo','loop'];
+const glyphs = n => Array.from({ length: n }, () => pick(GL)).join('');
+const words = n => Array.from({ length: n }, () => pick(WORDS)).join(' ');
+
+function hex(h, s = .8, l = .6) {
+  h = ((h % 360) + 360) % 360;
+  const a = s * Math.min(l, 1 - l);
+  const f = n => {
+    const k = (n + h / 30) % 12;
+    const c = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    return Math.round(255 * c).toString(16).padStart(2, '0');
+  };
+  return '#' + f(0) + f(8) + f(4);
+}
+function mk(tag, attrs = {}) {
+  const e = document.createElement(tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+function put(el, x, y, rot = 0) {
+  el.classList.add('p');
+  el.style.left = x + 'px';
+  el.style.top = y + 'px';
+  el.style.transform = `translate(-50%,-50%) rotate(${rot}deg)`;
+  stage.appendChild(el);
+  return el;
+}
+function tint(e, h) { e.style.accentColor = hsl(h); e.style.color = hsl(h); }
+function flash(e) { e.classList.add('hit'); setTimeout(() => e.classList.remove('hit'), 450); }
+function anim(ms, fn) {
+  return new Promise(res => {
+    const t0 = performance.now();
+    const f = t => {
+      const p = Math.min(1, (t - t0) / ms);
+      fn(p);
+      p < 1 ? requestAnimationFrame(f) : res();
+    };
+    requestAnimationFrame(f);
+  });
+}
+
+// ---------- background lattice ----------
+let lat = [], LC, LR, LS;
+function buildLattice() {
+  LS = Math.max(18, Math.round(Math.min(W, H) / 42));
+  LC = Math.ceil(W / LS) + 1;
+  LR = Math.ceil(H / LS) + 1;
+  lat = new Array(LC * LR);
+  const frag = document.createDocumentFragment();
+  for (let r = 0; r < LR; r++) for (let c = 0; c < LC; c++) {
+    const e = mk('input', { type: Math.random() < .22 ? 'radio' : 'checkbox', tabindex: -1 });
+    e.className = 'lat p';
+    const s = LS * R(.35, .6);
+    e.style.width = e.style.height = s + 'px';
+    e.style.left = (c * LS + R(-3, 3)) + 'px';
+    e.style.top = (r * LS + R(-3, 3)) + 'px';
+    e.style.transform = `translate(-50%,-50%) rotate(${R(-30, 30)}deg)`;
+    frag.appendChild(e);
+    lat[r * LC + c] = e;
+  }
+  stage.appendChild(frag);
+}
+// A ring that spreads outward from (x,y), flipping lattice cells as it passes
+function ripple(x, y, rad, hue, speed = 3) {
+  if (!LS) return;
+  const c0 = Math.max(0, Math.floor((x - rad) / LS)), c1 = Math.min(LC - 1, Math.ceil((x + rad) / LS));
+  const r0 = Math.max(0, Math.floor((y - rad) / LS)), r1 = Math.min(LR - 1, Math.ceil((y + rad) / LS));
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    const e = lat[r * LC + c];
+    const d = Math.hypot(c * LS - x, r * LS - y);
+    if (d > rad || !e) continue;
+    setTimeout(() => { e.checked = !e.checked; e.style.accentColor = hsl(hue + d * .3); }, d * speed);
+  }
+}
+
+// ---------- chain primitives (each step listens for a real DOM event) ----------
+// One-shot handoff: element i fires evt -> listener activates element i+1
+function chainSeq(els, pts, hue, evt, act, delay, rad = 45, manual = true) {
+  return () => new Promise(res => {
+    els.forEach((e, i) => e.addEventListener(evt, () => {
+      flash(e);
+      ripple(pts[i][0], pts[i][1], rad, hue);
+      if (i === els.length - 1) return res();
+      setTimeout(() => { act(els[i + 1]); if (manual) fire(els[i + 1], evt); }, delay);
+    }, { once: true }));
+    act(els[0]);
+    if (manual) fire(els[0], evt);
+  });
+}
+// Multi-step: element keeps stepping until full, then hands off
+function chainSteps(els, pts, hue, evt, isFull, step, delay, rad = 30) {
+  return () => new Promise(res => {
+    els.forEach((e, i) => e.addEventListener(evt, () => {
+      flash(e);
+      ripple(pts[i][0], pts[i][1], rad, hue);
+      if (!isFull(e)) return setTimeout(() => { step(e); fire(e, evt); }, delay);
+      if (i === els.length - 1) return res();
+      setTimeout(() => { step(els[i + 1]); fire(els[i + 1], evt); }, delay * 1.5);
+    }));
+    step(els[0]);
+    fire(els[0], evt);
+  });
+}
+// Overlapping flow: element i passing a threshold starts element i+1
+function chainFlow(els, pts, hue, ms, th, set, doneAt = 1, rad = 40) {
+  return () => new Promise(res => {
+    const last = els.length - 1;
+    const go = i => anim(ms, p => { set(els[i], p); fire(els[i], 'input'); });
+    els.forEach((e, i) => {
+      let passed = false, done = false;
+      e.addEventListener('input', () => {
+        const p = Number(e.value) / Number(e.max || 100);
+        if (!passed && p >= th) {
+          passed = true;
+          flash(e);
+          ripple(pts[i][0], pts[i][1], rad, hue);
+          if (i < last) go(i + 1);
+        }
+        if (i === last && !done && p >= doneAt) { done = true; res(); }
+      });
+    });
+    go(0);
+  });
+}
+
+// ---------- contraptions ----------
+function dominoes(b, hue) {
+  const n = Math.max(7, Math.round(b.w / 20)), amp = b.h * R(.15, .35), ph = R(0, 6.28), f = R(.7, 1.6);
+  let els = [], pts = [];
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1);
+    const x = b.x + b.w * (.08 + .84 * t);
+    const y = b.cy + Math.sin(t * Math.PI * 2 * f + ph) * amp;
+    const slope = Math.cos(t * Math.PI * 2 * f + ph) * amp * Math.PI * 2 * f / (b.w * .84);
+    const s = 14 + 12 * Math.sin(t * Math.PI);
+    const e = mk('input', { type: 'checkbox', tabindex: -1 });
+    e.style.width = e.style.height = s + 'px';
+    tint(e, hue + t * 50);
+    put(e, x, y, Math.atan(slope) * 180 / Math.PI + R(-12, 12));
+    els.push(e); pts.push([x, y]);
+  }
+  if (b.dir < 0) { els.reverse(); pts.reverse(); }
+  return chainSeq(els, pts, hue, 'change', e => { e.checked = true; }, 70);
+}
+
+function spiral(b, hue) {
+  const n = RI(16, 28), name = 's' + Math.random(), rmax = Math.min(b.w, b.h) * .42;
+  const a0 = R(0, 6.28), cw = pick([1, -1]), turns = R(1.4, 2.4), inward = Math.random() < .5;
+  const els = [], pts = [];
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1), tt = inward ? t : 1 - t;
+    const a = a0 + cw * t * turns * 6.283, r = rmax * (1 - .82 * tt);
+    const x = b.cx + Math.cos(a) * r, y = b.cy + Math.sin(a) * r, s = 10 + 14 * (1 - tt);
+    const e = mk('input', { type: 'radio', name, tabindex: -1 });
+    e.style.width = e.style.height = s + 'px';
+    tint(e, hue + t * 60);
+    put(e, x, y);
+    els.push(e); pts.push([x, y]);
+  }
+  return chainSeq(els, pts, hue, 'change', e => { e.checked = true; }, 75);
+}
+
+function fan(b, hue) {
+  const k = RI(5, 9), corner = RI(0, 3);
+  const px = b.x + b.w * (corner % 2 ? .88 : .12), py = b.y + b.h * (corner < 2 ? .88 : .12);
+  const base = [-90, -180, 0, 90][corner], L0 = Math.min(b.w, b.h) * R(.75, 1.05);
+  const els = [], pts = [];
+  for (let i = 0; i < k; i++) {
+    const t = i / (k - 1), a = (base + 6 + t * 78) * Math.PI / 180, L = L0 * R(.7, 1);
+    const e = mk('input', { type: 'range', min: 0, max: 100, value: 0, tabindex: -1 });
+    e.style.width = L + 'px';
+    tint(e, hue + t * 45);
+    put(e, px + Math.cos(a) * L / 2, py + Math.sin(a) * L / 2, a * 180 / Math.PI);
+    els.push(e); pts.push([px + Math.cos(a) * L, py + Math.sin(a) * L]);
+  }
+  return chainFlow(els, pts, hue, 650, .5, (e, p) => { e.value = p * 100; });
+}
+
+const SETS = [
+  ['◐','◓','◑','◒','◐','◓'], ['▁','▂','▃','▄','▅','▆','▇','█'], ['α','β','γ','δ','ε','ζ','η'],
+  ['·','∘','○','◯','●','◉'], ['n','ne','e','se','s','sw','w','nw'], ['i','ii','iii','iv','v','vi','vii'],
+  ['░','▒','▓','█','▓','▒','░']
+];
+function selects(b, hue) {
+  const m = RI(3, 5);
+  let els = [], pts = [];
+  for (let i = 0; i < m; i++) {
+    const t = m > 1 ? i / (m - 1) : .5, set = pick(SETS), e = mk('select', { tabindex: -1 });
+    set.forEach(s => { const o = mk('option'); o.textContent = s; e.appendChild(o); });
+    const list = Math.random() < .6;
+    let fs;
+    if (list) { e.size = set.length; fs = clamp(b.h * .8 / (set.length * 1.35), 8, 16); }
+    else fs = clamp(b.h / (m * 1.6), 12, 30);
+    e.style.fontSize = fs + 'px';
+    tint(e, hue + i * 25);
+    const x = b.x + b.w * (.15 + .7 * t), y = b.cy + R(-b.h * .15, b.h * .15);
+    put(e, x, y, R(-25, 25));
+    els.push(e); pts.push([x, y]);
+  }
+  if (b.dir < 0) { els.reverse(); pts.reverse(); }
+  return chainSteps(els, pts, hue, 'change', e => e.selectedIndex === e.options.length - 1, e => { e.selectedIndex++; }, 110);
+}
+
+function organ(b, hue) {
+  const n = Math.max(5, Math.round(b.w / 17));
+  let els = [], pts = [];
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1), x = b.x + b.w * (.08 + .84 * t), len = b.h * R(.3, .85), base = b.y + b.h * .92;
+    const e = mk('progress', { max: 100, value: 0 });
+    e.style.width = len + 'px';
+    e.style.height = R(6, 12) + 'px';
+    tint(e, hue + t * 40);
+    put(e, x, base - len / 2, -90 + R(-10, 10));
+    els.push(e); pts.push([x, base - len]);
+  }
+  if (b.dir < 0) { els.reverse(); pts.reverse(); }
+  return chainFlow(els, pts, hue, 520, .35, (e, p) => { e.value = p * 100; });
+}
+
+function buttons(b, hue) {
+  const cs = clamp(Math.round(Math.min(b.w, b.h) / 5.5), 16, 30);
+  const cols = Math.max(2, Math.floor(b.w * .85 / cs)), rows = Math.max(2, Math.floor(b.h * .82 / cs));
+  const x0 = b.cx - (cols - 1) * cs / 2, y0 = b.cy - (rows - 1) * cs / 2, g = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const e = mk('button', { tabindex: -1 });
+    e.className = 'k';
+    e.textContent = pick(GL);
+    e.style.width = e.style.height = (cs - 3) + 'px';
+    e.style.fontSize = (cs * .5) + 'px';
+    tint(e, hue + (r + c) * 5);
+    const x = x0 + c * cs, y = y0 + r * cs;
+    put(e, x, y, R(-18, 18));
+    g.push({ e, r, c, x, y });
+  }
+  return () => new Promise(res => {
+    let n = 0;
+    const at = (r, c) => g[r * cols + c];
+    g.forEach(o => o.e.addEventListener('click', () => {
+      if (o.e.classList.contains('on')) return;
+      o.e.classList.add('on');
+      n++;
+      ripple(o.x, o.y, 28, hue);
+      [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(([dr, dc]) => {
+        const rr = o.r + dr, cc = o.c + dc;
+        if (rr < 0 || cc < 0 || rr >= rows || cc >= cols) return;
+        const t = at(rr, cc);
+        if (!t.e.classList.contains('on')) setTimeout(() => t.e.click(), R(40, 110));
+      });
+      if (n === g.length) res();
+    }));
+    at(RI(0, rows - 1), b.dir > 0 ? 0 : cols - 1).e.click();
+  });
+}
+
+function scroller(b, hue) {
+  const box = mk('div');
+  box.className = 'scr';
+  const w = b.w * R(.5, .75), h = b.h * R(.55, .8);
+  box.style.width = w + 'px';
+  box.style.height = h + 'px';
+  box.style.fontSize = clamp(h / 7, 10, 15) + 'px';
+  tint(box, hue);
+  const marks = [];
+  for (let i = 0; i < 34; i++) {
+    const row = mk('div');
+    const c = mk('input', { type: i % 3 ? 'checkbox' : 'radio', tabindex: -1 });
+    c.style.accentColor = hsl(hue + i * 4);
+    row.appendChild(c);
+    const sp = mk('span');
+    sp.textContent = Math.random() < .5 ? glyphs(RI(4, 12)) : words(RI(1, 3));
+    row.appendChild(sp);
+    box.appendChild(row);
+    marks.push(c);
+  }
+  put(box, b.cx, b.cy, R(-14, 14));
+  return () => new Promise(res => {
+    const io = new IntersectionObserver(es => es.forEach(en => { if (en.isIntersecting) en.target.checked = true; }), { root: box, threshold: 1 });
+    marks.forEach(m => io.observe(m));
+    let done = false, k = 0;
+    const finish = () => { if (done) return; done = true; io.disconnect(); flash(box); res(); };
+    box.addEventListener('scroll', () => {
+      if (++k % 5 === 0) ripple(b.cx + R(-w / 2, w / 2), b.cy + R(-h / 2, h / 2), 30, hue);
+      if (box.scrollTop + box.clientHeight >= box.scrollHeight - 2) finish();
+    });
+    const max = box.scrollHeight - box.clientHeight;
+    anim(Math.max(1200, max * 5), p => { box.scrollTop = p * max; }).then(finish);
+  });
+}
+
+function meters(b, hue) {
+  const n = RI(10, 16), r = Math.min(b.w, b.h) * .22, ml = Math.min(b.w, b.h) * R(.14, .22);
+  const a0 = R(0, 6.28), cw = pick([1, -1]), els = [], pts = [];
+  for (let i = 0; i < n; i++) {
+    const a = a0 + cw * i / n * 6.283;
+    const e = mk('meter', { min: 0, max: 100, low: 30, high: 70, optimum: 90, value: 0 });
+    e.style.width = ml + 'px';
+    e.style.height = '9px';
+    tint(e, hue + i * 8);
+    put(e, b.cx + Math.cos(a) * (r + ml / 2), b.cy + Math.sin(a) * (r + ml / 2), a * 180 / Math.PI);
+    els.push(e); pts.push([b.cx + Math.cos(a) * (r + ml), b.cy + Math.sin(a) * (r + ml)]);
+  }
+  return chainFlow(els, pts, hue, 600, .5, (e, p) => { e.value = Math.sin(p * Math.PI) * 100; }, .97);
+}
+
+function odometer(b, hue) {
+  const m = RI(3, 5), fs = clamp(Math.min(b.h * .24, b.w / (m * 1.9)), 12, 48);
+  let els = [], pts = [];
+  for (let i = 0; i < m; i++) {
+    const t = m > 1 ? i / (m - 1) : .5, x = b.x + b.w * (.14 + .72 * t);
+    const y = b.cy - Math.sin(t * Math.PI) * b.h * .15 + R(-8, 8);
+    const e = mk('input', { type: 'number', min: 0, max: RI(4, 9), value: 0, tabindex: -1 });
+    e.style.fontSize = fs + 'px';
+    e.style.width = (fs * 1.6) + 'px';
+    tint(e, hue + i * 20);
+    put(e, x, y, R(-20, 20));
+    els.push(e); pts.push([x, y]);
+  }
+  if (b.dir < 0) { els.reverse(); pts.reverse(); }
+  return chainSteps(els, pts, hue, 'input', e => Number(e.value) >= Number(e.max), e => { e.stepUp(); }, 110);
+}
+
+function colors(b, hue) {
+  const n = RI(5, 9), s = clamp(Math.min(b.w / (n * .9), b.h * .3), 18, 60);
+  let els = [], pts = [];
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1), x = b.x + b.w * (.1 + .8 * t), y = b.cy + (i % 2 ? -1 : 1) * b.h * R(.08, .25);
+    const e = mk('input', { type: 'color', value: '#1a1a22', tabindex: -1 });
+    e.dataset.v = hex(hue + t * 120);
+    e.style.width = s + 'px';
+    e.style.height = (s * R(.6, 1.4)) + 'px';
+    put(e, x, y, R(-30, 30));
+    els.push(e); pts.push([x, y]);
+  }
+  if (b.dir < 0) { els.reverse(); pts.reverse(); }
+  return chainSeq(els, pts, hue, 'input', e => { e.value = e.dataset.v; }, 110, 50);
+}
+
+function stairs(b, hue) {
+  const n = RI(4, 6), fs = clamp(b.h / (n * 1.8), 10, 18), els = [], pts = [];
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1);
+    let x = b.x + b.w * (.2 + .6 * t);
+    if (b.dir < 0) x = b.x + b.w - (x - b.x);
+    const y = b.y + b.h * (.15 + .7 * t);
+    const d = mk('details'), s = mk('summary'), p = mk('div');
+    s.textContent = glyphs(RI(2, 5));
+    p.textContent = Math.random() < .5 ? glyphs(RI(5, 12)) : words(RI(2, 4));
+    d.appendChild(s); d.appendChild(p);
+    d.style.fontSize = fs + 'px';
+    tint(d, hue + i * 15);
+    put(d, x, y, R(-12, 12));
+    els.push(d); pts.push([x, y]);
+  }
+  return chainSeq(els, pts, hue, 'toggle', e => { e.open = true; }, 230, 45, false);
+}
+
+function typewriter(b, hue) {
+  const m = RI(1, 2), fs = clamp(b.h / 9, 10, 16), els = [], pts = [];
+  for (let i = 0; i < m; i++) {
+    const ta = mk('textarea', { rows: 3, tabindex: -1 });
+    ta.style.width = (b.w * R(.55, .8)) + 'px';
+    ta.style.height = (fs * 4.2) + 'px';
+    ta.style.fontSize = fs + 'px';
+    tint(ta, hue + i * 30);
+    ta.dataset.t = words(RI(5, 9));
+    const x = b.cx + R(-10, 10), y = b.cy + (i - (m - 1) / 2) * fs * 5;
+    put(ta, x, y, R(-15, 15));
+    els.push(ta); pts.push([x, y]);
+  }
+  return chainSteps(els, pts, hue, 'input', e => e.value.length >= e.dataset.t.length,
+    e => { e.value = e.dataset.t.slice(0, e.value.length + 1); }, 28, 22);
+}
+
+// Slider "pipe" that carries the signal from one contraption to the next
+function pipe(p1, p2, hue) {
+  const len = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]);
+  const ang = Math.atan2(p2[1] - p1[1], p2[0] - p1[0]) * 180 / Math.PI;
+  const e = mk('input', { type: 'range', min: 0, max: 1000, value: 0, tabindex: -1 });
+  e.style.width = len + 'px';
+  tint(e, hue);
+  put(e, (p1[0] + p2[0]) / 2, (p1[1] + p2[1]) / 2, ang);
+  return () => new Promise(res => {
+    let last = 0, done = false;
+    e.addEventListener('input', () => {
+      const v = Number(e.value);
+      if (v - last > 90) {
+        last = v;
+        const t = v / 1000;
+        ripple(p1[0] + (p2[0] - p1[0]) * t, p1[1] + (p2[1] - p1[1]) * t, 34, hue, 2);
+      }
+      if (!done && v >= 1000) { done = true; flash(e); res(); }
+    });
+    anim(len * 2.4 + 250, p => { e.value = Math.round(p * 1000); fire(e, 'input'); });
+  });
+}
+
+const TYPES = [dominoes, spiral, fan, selects, organ, buttons, scroller, meters, odometer, colors, stairs, typewriter];
+
+function assignTypes(n) {
+  const out = [];
+  let bag = [];
+  while (out.length < n) {
+    if (!bag.length) bag = [...TYPES].sort(() => Math.random() - .5);
+    const t = bag.pop();
+    if (out.length && out[out.length - 1] === t && bag.length) { bag.unshift(t); continue; }
+    out.push(t);
+  }
+  return out;
+}
+
+// ---------- the machine ----------
+async function cycle() {
+  const g = ++gen;
+  stage.style.opacity = 0;
+  await sleep(50);
+  stage.innerHTML = '';
+  W = innerWidth; H = innerHeight;
+  buildLattice();
+
+  const cols = clamp(Math.round(W / 250), 2, 8), rows = clamp(Math.round(H / 210), 2, 6);
+  const cw = W / cols, rh = H / rows, slots = [];
+  for (let r = 0; r < rows; r++) for (let k = 0; k < cols; k++) {
+    const c = r % 2 ? cols - 1 - k : k;
+    slots.push({
+      x: c * cw, y: r * rh, w: cw, h: rh,
+      cx: c * cw + cw / 2 + R(-cw * .04, cw * .04),
+      cy: r * rh + rh / 2 + R(-rh * .04, rh * .04),
+      dir: r % 2 ? -1 : 1
+    });
+  }
+  const n = slots.length, hue0 = R(0, 360), hueAt = i => hue0 + i * (300 / n);
+  const types = assignTypes(n);
+  const runs = slots.map((b, i) => types[i](b, hueAt(i)));
+  const lerp = (a, b, t) => [a.cx + (b.cx - a.cx) * t, a.cy + (b.cy - a.cy) * t];
+  const pipes = [];
+  for (let i = 0; i < n - 1; i++) pipes.push(pipe(lerp(slots[i], slots[i + 1], .3), lerp(slots[i], slots[i + 1], .7), hueAt(i + .5)));
+
+  stage.style.opacity = 1;
+  await sleep(1500);
+
+  for (let i = 0; i < n; i++) {
+    if (g !== gen) return;
+    await Promise.race([runs[i](), sleep(20000)]);
+    if (i < n - 1) {
+      if (g !== gen) return;
+      await Promise.race([pipes[i](), sleep(8000)]);
+    }
+  }
+  if (g !== gen) return;
+
+  // Finale: one wave across the whole screen, then fade and rebuild
+  const last = slots[n - 1], diag = Math.hypot(W, H);
+  ripple(last.cx, last.cy, diag, hueAt(n), 1.2);
+  await sleep(diag * 1.2 + 1800);
+  if (g !== gen) return;
+  stage.style.opacity = 0;
+  await sleep(1600);
+  if (g === gen) cycle();
+}
+
+// Ambient static so the lattice is never fully still
+setInterval(() => { if (W) ripple(R(0, W), R(0, H), R(15, 40), R(0, 360), 4); }, 900);
+
+let rt;
+addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(cycle, 400); });
+
+cycle();
+</script>
+
+</body></html>
